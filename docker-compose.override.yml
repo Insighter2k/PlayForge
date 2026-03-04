@@ -1,0 +1,14 @@
+# Local dev overrides — NOT committed with secrets
+services:
+  postgres:
+    ports:
+      - "5432:5432"   # expose to host for local tooling (DBeaver, psql, etc.)
+    environment:
+      POSTGRES_DB: playforge_dev
+
+  app:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Postgres: >-
+        Host=postgres;Port=5432;Database=playforge_dev;Username=playforge;Password=changeme
+      Steam__ApiKey: ${STEAM_API_KEY:-}

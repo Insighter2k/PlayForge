@@ -1,0 +1,81 @@
+@page "/friends"
+@attribute [Authorize]
+@using PlayForge.Application.DTOs
+@using PlayForge.Application.Interfaces
+@inject IFriendService FriendService
+
+<PageTitle>Friends — PlayForge</PageTitle>
+
+@if (_loading)
+{
+    <div class="page-loading">Loading your friends list…</div>
+}
+else if (_error is not null)
+{
+    <div class="page-error">@_error</div>
+}
+else
+{
+    <div class="library-header">
+        <h1>Friends</h1>
+        <span class="library-count">@_friends.Count friends</span>
+    </div>
+
+    @if (_friends.Count == 0)
+    {
+        <p class="page-empty">
+            No friends found. Make sure your Steam friend list is set to
+            <strong>Public</strong> in your Steam Privacy Settings.
+        </p>
+    }
+    else
+    {
+        <div class="friend-list">
+            @foreach (var friend in _friends)
+            {
+                <div class="friend-row">
+                    <img class="avatar-sm" src="@friend.AvatarUrl" alt="@friend.DisplayName" />
+                    <span class="friend-name">@friend.DisplayName</span>
+                    @if (friend.IsRegistered)
+                    {
+                        <span class="friend-badge">On PlayForge</span>
+                    }
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthTask { get; set; } = default!;
+
+    private IReadOnlyList<FriendDto> _friends = [];
+    private bool                     _loading = true;
+    private string?                  _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var auth      = await AuthTask;
+            var userIdStr = auth.User.FindFirst("playforge_user_id")?.Value;
+
+            if (userIdStr is null || !Guid.TryParse(userIdStr, out var userId))
+            {
+                _error = "Session error — please log in again.";
+                return;
+            }
+
+            _friends = await FriendService.GetFriendsAsync(userId);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load friends: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

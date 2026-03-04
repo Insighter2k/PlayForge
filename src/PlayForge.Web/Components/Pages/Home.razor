@@ -1,0 +1,48 @@
+@page "/"
+@using Microsoft.AspNetCore.Components.Authorization
+@using PlayForge.Web.Auth
+
+<PageTitle>PlayForge — Game Night, Decided</PageTitle>
+
+<AuthorizeView>
+    <Authorized>
+        <section class="hero hero--authenticated">
+            <img src="@context.User.FindFirst("avatar_url")?.Value"
+                 alt="Steam avatar"
+                 class="avatar-lg" />
+            <h1>Welcome back, @context.User.Identity?.Name!</h1>
+            <p class="hero-sub">Ready for game night?</p>
+            <div class="hero-actions">
+                <a href="/groups" class="btn-steam">My Groups</a>
+                <a href="/library" class="btn-steam-outline">My Library</a>
+            </div>
+        </section>
+    </Authorized>
+
+    <NotAuthorized>
+        <section class="hero hero--landing">
+            <div class="hero-text">
+                <h1>PlayForge</h1>
+                <p class="hero-tagline">Find the game your whole crew actually owns — then vote on it.</p>
+                <ul class="feature-list">
+                    <li>Connect your Steam library</li>
+                    <li>Form a group with friends</li>
+                    <li>Vote on a game you all own</li>
+                </ul>
+                <a href="/auth/login" class="btn-steam btn-steam--large">
+                    <svg class="steam-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M12 0C5.372 0 0 5.372 0 12c0 5.084 3.163 9.426 7.627 11.174L12.5 13.5H12c-3.309 0-6-2.691-6-6s2.691-6 6-6 6 2.691 6 6c0 .785-.156 1.532-.432 2.217l-5.022 7.456C17.99 16.67 24 14.546 24 12c0-6.628-5.372-12-12-12z"/>
+                    </svg>
+                    Login with Steam
+                </a>
+            </div>
+            <div class="hero-visual" aria-hidden="true">
+                <div class="hero-card-stack">
+                    <div class="hero-card"></div>
+                    <div class="hero-card"></div>
+                    <div class="hero-card hero-card--top"></div>
+                </div>
+            </div>
+        </section>
+    </NotAuthorized>
+</AuthorizeView>

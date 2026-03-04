@@ -1,0 +1,29 @@
+## .gitignore for PlayForge (.NET / Docker)
+
+# Build outputs
+bin/
+obj/
+publish/
+
+# Secrets — NEVER commit
+.env
+*.user
+appsettings.*.local.json
+secrets.json
+
+# EF migrations designer files are committed, but not sensitive
+# src/**/Migrations/  ← intentionally NOT ignored
+
+# Rider / VS / VSCode
+.idea/
+.vs/
+*.suo
+*.user
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.*.local.yml

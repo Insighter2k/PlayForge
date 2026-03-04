@@ -1,0 +1,22 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@inject NavigationManager Nav
+
+<AuthorizeView>
+    <Authorized>
+        <nav class="nav-links">
+            <a href="/library">Library</a>
+            <a href="/friends">Friends</a>
+            <a href="/groups">Groups</a>
+            <span class="nav-avatar">
+                <img src="@context.User.FindFirst("avatar_url")?.Value" alt="avatar" class="avatar-sm" />
+                <span>@context.User.Identity?.Name</span>
+            </span>
+            <a href="/auth/logout" class="btn-steam-outline">Sign Out</a>
+        </nav>
+    </Authorized>
+    <NotAuthorized>
+        <nav class="nav-links">
+            <a href="/auth/login" class="btn-steam">Login with Steam</a>
+        </nav>
+    </NotAuthorized>
+</AuthorizeView>

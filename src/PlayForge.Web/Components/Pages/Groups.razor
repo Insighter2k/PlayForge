@@ -1,0 +1,132 @@
+@page "/groups"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using PlayForge.Application.DTOs
+@using PlayForge.Application.Interfaces
+@inject IGroupService GroupService
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Groups — PlayForge</PageTitle>
+
+@if (_loading)
+{
+    <div class="page-loading">Loading your groups…</div>
+}
+else if (_error is not null)
+{
+    <div class="page-error">@_error</div>
+}
+else
+{
+    <div class="library-header">
+        <h1>Groups</h1>
+        <span class="library-count">@_groups.Count groups</span>
+    </div>
+
+    <div class="group-actions">
+        <button class="btn-steam" @onclick="ToggleCreate">+ Create Group</button>
+        <button class="btn-steam-outline" @onclick="ToggleJoin">Join by Code</button>
+    </div>
+
+    @if (_showCreate)
+    {
+        <div class="group-form">
+            <input class="form-input" @bind="_newGroupName" placeholder="Group name" maxlength="64" />
+            <button class="btn-steam" @onclick="CreateGroup" disabled="@_busy">Create</button>
+            @if (_formError is not null) { <span class="form-error">@_formError</span> }
+        </div>
+    }
+
+    @if (_showJoin)
+    {
+        <div class="group-form">
+            <input class="form-input" @bind="_inviteCode" placeholder="Invite code (e.g. ABCD1234)" maxlength="8" />
+            <button class="btn-steam" @onclick="JoinGroup" disabled="@_busy">Join</button>
+            @if (_formError is not null) { <span class="form-error">@_formError</span> }
+        </div>
+    }
+
+    @if (_groups.Count == 0)
+    {
+        <p class="page-empty">You're not in any groups yet. Create one or join with an invite code.</p>
+    }
+    else
+    {
+        <div class="group-list">
+            @foreach (var group in _groups)
+            {
+                <a class="group-card" href="/groups/@group.Id">
+                    <div class="group-card-info">
+                        <span class="group-name">@group.Name</span>
+                        <span class="group-meta">@group.MemberCount members</span>
+                    </div>
+                    @if (group.HasActiveSession)
+                    {
+                        <span class="group-badge group-badge--active">Vote active</span>
+                    }
+                    <span class="group-arrow">›</span>
+                </a>
+            }
+        </div>
+    }
+}
+
+@code {
+    private IReadOnlyList<GroupSummaryDto> _groups  = [];
+    private bool    _loading     = true;
+    private string? _error;
+    private bool    _showCreate;
+    private bool    _showJoin;
+    private bool    _busy;
+    private string  _newGroupName = string.Empty;
+    private string  _inviteCode   = string.Empty;
+    private string? _formError;
+    private Guid    _userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var auth      = await AuthStateProvider.GetAuthenticationStateAsync();
+            var userIdStr = auth.User.FindFirst("playforge_user_id")?.Value;
+            if (userIdStr is null || !Guid.TryParse(userIdStr, out _userId))
+            {
+                _error = "Session error — please log in again.";
+                return;
+            }
+            _groups = await GroupService.GetUserGroupsAsync(_userId);
+        }
+        catch (Exception ex) { _error = $"Failed to load groups: {ex.Message}"; }
+        finally { _loading = false; }
+    }
+
+    private void ToggleCreate() { _showCreate = !_showCreate; _showJoin = false; _formError = null; }
+    private void ToggleJoin()   { _showJoin   = !_showJoin;   _showCreate = false; _formError = null; }
+
+    private async Task CreateGroup()
+    {
+        if (string.IsNullOrWhiteSpace(_newGroupName)) { _formError = "Name is required."; return; }
+        _busy = true; _formError = null;
+        try
+        {
+            var group = await GroupService.CreateGroupAsync(_userId, _newGroupName);
+            Nav.NavigateTo($"/groups/{group.Id}", forceLoad: true);
+        }
+        catch (Exception ex) { _formError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task JoinGroup()
+    {
+        if (string.IsNullOrWhiteSpace(_inviteCode)) { _formError = "Invite code is required."; return; }
+        _busy = true; _formError = null;
+        try
+        {
+            var group = await GroupService.JoinGroupByCodeAsync(_userId, _inviteCode);
+            Nav.NavigateTo($"/groups/{group.Id}", forceLoad: true);
+        }
+        catch (Exception ex) { _formError = ex.Message; }
+        finally { _busy = false; }
+    }
+}

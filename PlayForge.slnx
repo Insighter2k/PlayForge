@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PlayForge.Application/PlayForge.Application.csproj" />
+    <Project Path="src/PlayForge.Domain/PlayForge.Domain.csproj" />
+    <Project Path="src/PlayForge.Infrastructure/PlayForge.Infrastructure.csproj" />
+    <Project Path="src/PlayForge.Web/PlayForge.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PlayForge.Application.Tests/PlayForge.Application.Tests.csproj" />
+    <Project Path="tests/PlayForge.Domain.Tests/PlayForge.Domain.Tests.csproj" />
+    <Project Path="tests/PlayForge.Integration.Tests/PlayForge.Integration.Tests.csproj" />
+  </Folder>
+</Solution>
