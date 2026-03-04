@@ -1,0 +1,659 @@
+@page "/groups/{GroupId:guid}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@using PlayForge.Application.DTOs
+@using PlayForge.Application.Interfaces
+@using PlayForge.Domain.Enums
+@using PlayForge.Web.Services
+@inject IGroupService   GroupService
+@inject IVoteService    VoteService
+@inject VoteNotifier    VoteNotifier
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>@(_group?.Name ?? "Group") — PlayForge</PageTitle>
+
+@if (_loading)
+{
+    <div class="page-loading">Loading group…</div>
+}
+else if (_error is not null)
+{
+    <div class="page-error">@_error</div>
+}
+else if (_group is not null)
+{
+    <div class="group-detail-header">
+        <div>
+            <h1>@_group.Name</h1>
+            <span class="group-meta">@_members.Count members</span>
+        </div>
+        <div class="invite-block">
+            <span class="invite-label">Invite code</span>
+            <span class="invite-code">@_group.InviteCode</span>
+            <a class="btn-steam-outline history-btn" href="/groups/@GroupId/history">History</a>
+            @if (_group.HostUserId == _userId)
+            {
+                <button class="btn-danger" @onclick="() => _showDeleteConfirm = true">Delete</button>
+            }
+        </div>
+    </div>
+
+    @if (_showDeleteConfirm)
+    {
+        <div class="confirm-dialog">
+            <p>Delete <strong>@_group.Name</strong>? All members, vote history, and candidates will be lost. This cannot be undone.</p>
+            <button class="btn-danger" @onclick="DeleteGroup" disabled="@_deleting">
+                @(_deleting ? "Deleting…" : "Yes, delete group")
+            </button>
+            <button class="btn-steam-outline" @onclick='() => _showDeleteConfirm = false'>Cancel</button>
+        </div>
+    }
+
+    <!-- Member chips -->
+    <div class="member-strip">
+        @foreach (var member in _members)
+        {
+            <div class="member-chip" title="@member.DisplayName">
+                <img class="avatar-sm" src="@member.AvatarUrl" alt="@member.DisplayName" />
+                <span>@member.DisplayName</span>
+                @if (member.Id == _group.HostUserId)
+                {
+                    <span class="friend-badge">Host</span>
+                }
+            </div>
+        }
+    </div>
+
+    <!-- Tabs -->
+    <div class="detail-tabs">
+        <button class="detail-tab @(_tab == "games" ? "detail-tab--active" : "")"
+                @onclick='() => _tab = "games"'>
+            Common Games
+            <span class="tab-count">@_commonGames.Count</span>
+        </button>
+        <button class="detail-tab @(_tab == "candidates" ? "detail-tab--active" : "")"
+                @onclick='() => _tab = "candidates"'>
+            Candidates
+            <span class="tab-count">@_candidates.Count</span>
+        </button>
+    </div>
+
+    <!-- ── Common Games tab ────────────────────────────────────────── -->
+    @if (_tab == "games")
+    {
+        <div class="tab-panel">
+            @if (_voteError is not null)
+            {
+                <div class="page-error" style="margin-bottom:1rem">@_voteError</div>
+            }
+
+            @* ── Active session ── *@
+            @if (_activeSession?.Status == VoteSessionStatus.Active)
+            {
+                <div class="vote-panel">
+                    <div class="vote-panel-header">
+                        <span class="vote-status-badge">Vote in progress</span>
+                        <span class="vote-progress">
+                            @_tally?.TotalVotes votes cast &nbsp;·&nbsp; @_members.Count members
+                        </span>
+                        <span class="vote-budget @(_myVotes.Count >= MaxVotes ? "vote-budget--full" : "")">
+                            @_myVotes.Count / @MaxVotes votes used
+                        </span>
+                        @if (_group.HostUserId == _userId)
+                        {
+                            <button class="btn-steam-outline vote-close-btn"
+                                    @onclick="CloseSession"
+                                    disabled="@_closingVote">
+                                @(_closingVote ? "Closing…" : "Close Vote")
+                            </button>
+                        }
+                    </div>
+
+                    <div class="vote-candidates">
+                        @foreach (var game in _sessionCandidates)
+                        {
+                            var votes    = _tally?.Tally.GetValueOrDefault(game.GameId, 0) ?? 0;
+                            var total    = _tally?.TotalVotes ?? 1;
+                            var pct      = (int)(votes * 100.0 / Math.Max(1, total));
+                            var ismine   = _myVotes.Contains(game.GameId);
+                            var atLimit  = !ismine && _myVotes.Count >= MaxVotes;
+
+                            <div class="vote-candidate @(ismine ? "vote-candidate--selected" : "") @(atLimit ? "vote-candidate--disabled" : "")"
+                                 @onclick="() => CastVote(game.GameId)">
+                                <img class="vote-cover"
+                                     src="@game.CoverImageUrl"
+                                     data-src="@game.CoverImageUrl"
+                                     alt="@game.Name"
+                                     loading="lazy"
+                                     onerror="window.onCoverError(this)" />
+                                <div class="cover-placeholder vote-cover" style="display:none" aria-hidden="true"></div>
+                                <div class="vote-info">
+                                    <span class="vote-name">@game.Name</span>
+                                    <div class="vote-bar-track">
+                                        <div class="vote-bar-fill" style="width:@pct%"></div>
+                                    </div>
+                                    <span class="vote-count">@votes vote@(votes == 1 ? "" : "s")</span>
+                                </div>
+                                @if (ismine)
+                                {
+                                    <span class="vote-check" title="Your vote">&#10003;</span>
+                                }
+                                else if (atLimit)
+                                {
+                                    <span class="vote-limit-icon" title="Vote limit reached">&#8203;</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            @* ── Closed session / winner ── *@
+            else if (_activeSession?.Status == VoteSessionStatus.Closed && _activeSession.WinnerGameId.HasValue)
+            {
+                var winner = _sessionCandidates.FirstOrDefault(g => g.GameId == _activeSession.WinnerGameId);
+                @if (winner is not null)
+                {
+                    <div class="vote-winner-panel">
+                        <span class="vote-winner-label">Winner</span>
+                        <img class="vote-winner-cover"
+                             src="@winner.CoverImageUrl"
+                             data-src="@winner.CoverImageUrl"
+                             alt="@winner.Name"
+                             loading="lazy"
+                             onerror="window.onCoverError(this)" />
+                        <div class="cover-placeholder vote-winner-cover" style="display:none" aria-hidden="true"></div>
+                        <span class="vote-winner-name">@winner.Name</span>
+                        @if (_group.HostUserId == _userId && _commonGames.Count > 0)
+                        {
+                            <button class="btn-steam"
+                                    style="margin-top:1rem"
+                                    @onclick="StartSession"
+                                    disabled="@_startingVote">
+                                Start New Vote
+                            </button>
+                        }
+                    </div>
+                }
+            }
+
+            @* ── No session — host can start ── *@
+            else if (_group.HostUserId == _userId && _commonGames.Count > 0)
+            {
+                <div class="detail-tab-actions">
+                    <button class="btn-steam"
+                            @onclick="StartSession"
+                            disabled="@_startingVote">
+                        @(_startingVote ? "Starting…" : "Start Vote")
+                    </button>
+                </div>
+            }
+
+            @* ── Sort + tag filter ── *@
+            <div class="filter-controls">
+                <select class="sort-select" @bind="_commonSortMode">
+                    <option value="az">A → Z</option>
+                    <option value="za">Z → A</option>
+                    <option value="review">Review Score</option>
+                </select>
+            </div>
+            @if (AvailableCommonTags.Any())
+            {
+                <div class="tag-filter">
+                    @foreach (var tag in AvailableCommonTags)
+                    {
+                        <button class="tag-chip @(_selectedTags.Contains(tag) ? "tag-chip--active" : "")"
+                                @onclick="() => ToggleCommonTag(tag)">@tag</button>
+                    }
+                    @if (_selectedTags.Count > 0)
+                    {
+                        <button class="tag-chip tag-chip--clear" @onclick='() => _selectedTags.Clear()'>✕ Clear</button>
+                    }
+                </div>
+            }
+
+            @* ── Game grid ── *@
+            @if (_commonGames.Count == 0)
+            {
+                <p class="page-empty">
+                    No common games found. Make sure all members have synced their Steam library
+                    by visiting the <a href="/library">Library</a> page.
+                </p>
+            }
+            else if (!FilteredCommonGames.Any())
+            {
+                <p class="page-empty">No games match the selected tags.</p>
+            }
+            else
+            {
+                <div class="game-grid">
+                    @foreach (var game in FilteredCommonGames)
+                    {
+                        <div class="game-card" data-game-appid="@game.AppId">
+                            <div class="game-cover-wrap">
+                                <a href="https://store.steampowered.com/app/@game.AppId/"
+                                   target="_blank" rel="noopener noreferrer" class="game-store-link"
+                                   title="View on Steam">
+                                    <img class="game-cover"
+                                         src="@game.CoverImageUrl"
+                                         data-src="@game.CoverImageUrl"
+                                         alt="@game.Name"
+                                         loading="lazy"
+                                         onerror="window.onCoverError(this)" />
+                                    <div class="cover-placeholder game-cover" style="display:none" aria-hidden="true"></div>
+                                </a>
+                            </div>
+                            <div class="game-meta">
+                                <span class="game-title">@game.Name</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    <!-- ── Candidates tab ─────────────────────────────────────────── -->
+    @if (_tab == "candidates")
+    {
+        <div class="tab-panel">
+            <div class="search-wrap" @onfocusout="OnSearchBlur">
+                <input class="form-input search-input"
+                       value="@_searchQuery"
+                       @oninput="OnSearchInput"
+                       @onkeydown="OnSearchKeyDown"
+                       placeholder="Search any Steam game to add as a candidate…"
+                       maxlength="100"
+                       autocomplete="off" />
+                @if (_searching)
+                {
+                    <span class="search-spinner">…</span>
+                }
+                @if (_showDropdown && _dropdownResults.Count > 0)
+                {
+                    <div class="search-dropdown">
+                        @foreach (var result in _dropdownResults)
+                        {
+                            var added = _candidates.Any(c => c.AppId == result.AppId);
+                            <button class="search-dropdown-item @(added ? "is-added" : "")"
+                                    @onclick="() => SelectResult(result)"
+                                    disabled="@(added || _busy)">
+                                <img src="@result.CoverImageUrl"
+                                     data-src="@result.CoverImageUrl"
+                                     alt="@result.Name"
+                                     loading="lazy"
+                                     onerror="window.onCoverError(this)" />
+                                <div class="cover-placeholder" style="display:none;width:40px;height:19px;flex-shrink:0" aria-hidden="true"></div>
+                                <span class="dropdown-name">@result.Name</span>
+                                @if (added)
+                                {
+                                    <span class="candidate-added-badge">Added</span>
+                                }
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+
+            @if (_searchError is not null)
+            {
+                <span class="form-error">@_searchError</span>
+            }
+
+            @if (_candidates.Count == 0)
+            {
+                <p class="page-empty candidate-empty">No candidates yet. Search above to add one.</p>
+            }
+            else
+            {
+                <h3 class="candidate-subheading">Added (@_candidates.Count)</h3>
+                <div class="candidate-list">
+                    @foreach (var candidate in _candidates)
+                    {
+                        <div class="candidate-row">
+                            <img class="candidate-cover"
+                                 src="@candidate.CoverImageUrl"
+                                 data-src="@candidate.CoverImageUrl"
+                                 alt="@candidate.Name"
+                                 loading="lazy"
+                                 onerror="window.onCoverError(this)" />
+                            <div class="cover-placeholder candidate-cover" style="display:none" aria-hidden="true"></div>
+                            <span class="candidate-name">@candidate.Name</span>
+                            <button class="btn-steam-outline candidate-btn candidate-btn--remove"
+                                    @onclick="() => RemoveCandidate(candidate.Id)"
+                                    disabled="@_busy">
+                                Remove
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public Guid GroupId { get; set; }
+
+    // ── State ───────────────────────────────────────────────────────────────
+    private GroupDto?                       _group;
+    private IReadOnlyList<UserDto>          _members       = [];
+    private IReadOnlyList<GameCandidateDto> _commonGames   = [];
+    private List<GroupCandidateDto>         _candidates       = [];
+    private List<GameSearchResultDto>       _dropdownResults  = [];
+    private HashSet<string>                 _selectedTags     = new(StringComparer.OrdinalIgnoreCase);
+    private string                          _commonSortMode   = "az";
+    private bool                            _showDropdown;
+    private bool                            _showDeleteConfirm;
+    private bool                            _deleting;
+    private CancellationTokenSource         _debounceCts      = new();
+
+    private VoteSessionDto?                 _activeSession;
+    private IReadOnlyList<GameCandidateDto> _sessionCandidates = [];
+    private VoteTallyDto?                   _tally;
+    private HashSet<Guid>                   _myVotes           = [];
+    private const int MaxVotes = 5;
+
+    private string  _tab         = "candidates";
+    private bool    _loading     = true;
+    private bool    _busy;
+    private bool    _searching;  // shows spinner in input
+    private bool    _startingVote;
+    private bool    _closingVote;
+    private string? _error;
+    private string? _searchError;
+    private string? _voteError;
+    private string  _searchQuery = string.Empty;
+    private Guid    _userId;
+
+    // ── Lifecycle ───────────────────────────────────────────────────────────
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var auth      = await AuthStateProvider.GetAuthenticationStateAsync();
+            var userIdStr = auth.User.FindFirst("playforge_user_id")?.Value;
+            if (userIdStr is null || !Guid.TryParse(userIdStr, out _userId))
+            {
+                _error = "Session error — please log in again.";
+                return;
+            }
+
+            _group       = await GroupService.GetGroupAsync(GroupId);
+            _members     = await GroupService.GetGroupMembersAsync(GroupId);
+            _commonGames = await GroupService.GetGroupCommonGamesAsync(GroupId);
+            _candidates  = (await GroupService.GetGroupCandidatesAsync(GroupId)).ToList();
+
+            // Check for an active or recently closed vote session
+            _activeSession = await VoteService.GetActiveSessionAsync(GroupId);
+            if (_activeSession is not null)
+            {
+                _sessionCandidates = await VoteService.GetSessionCandidatesAsync(_activeSession.Id);
+                _tally             = await VoteService.GetSessionTallyAsync(_activeSession.Id);
+                _myVotes           = [.. await VoteService.GetUserVotesAsync(_activeSession.Id, _userId)];
+                _tab               = "games"; // surface the vote
+            }
+        }
+        catch (Exception ex) { _error = $"Failed to load group: {ex.Message}"; }
+        finally { _loading = false; }
+
+        // Subscribe to real-time events
+        VoteNotifier.SessionStarted += OnSessionStarted;
+        VoteNotifier.TallyUpdated   += OnTallyUpdated;
+        VoteNotifier.SessionClosed  += OnSessionClosed;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        VoteNotifier.SessionStarted -= OnSessionStarted;
+        VoteNotifier.TallyUpdated   -= OnTallyUpdated;
+        VoteNotifier.SessionClosed  -= OnSessionClosed;
+        _debounceCts.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    // ── VoteNotifier handlers (called from any circuit) ──────────────────────
+
+    private void OnSessionStarted(Guid groupId, VoteSessionDto session)
+    {
+        if (groupId != GroupId) return;
+        _ = InvokeAsync(async () =>
+        {
+            _activeSession     = session;
+            _sessionCandidates = await VoteService.GetSessionCandidatesAsync(session.Id);
+            _tally             = await VoteService.GetSessionTallyAsync(session.Id);
+            _myVotes           = [];
+            _voteError         = null;
+            _tab               = "games";
+            StateHasChanged();
+        });
+    }
+
+    private void OnTallyUpdated(Guid groupId, VoteTallyDto tally)
+    {
+        if (groupId != GroupId) return;
+        _ = InvokeAsync(() =>
+        {
+            _tally = tally;
+            StateHasChanged();
+        });
+    }
+
+    private void OnSessionClosed(Guid groupId, VoteSessionDto session)
+    {
+        if (groupId != GroupId) return;
+        _ = InvokeAsync(() =>
+        {
+            _activeSession = session;
+            StateHasChanged();
+        });
+    }
+
+    // ── Vote actions ─────────────────────────────────────────────────────────
+
+    private async Task StartSession()
+    {
+        _startingVote = true; _voteError = null;
+        try
+        {
+            var session        = await VoteService.StartSessionAsync(GroupId, _userId);
+            _sessionCandidates = await VoteService.GetSessionCandidatesAsync(session.Id);
+            _tally             = await VoteService.GetSessionTallyAsync(session.Id);
+            _myVotes           = [];
+            _activeSession     = session;
+            _tab               = "games";
+            VoteNotifier.NotifySessionStarted(GroupId, session);
+        }
+        catch (Exception ex) { _voteError = ex.Message; }
+        finally { _startingVote = false; }
+    }
+
+    private async Task CastVote(Guid gameId)
+    {
+        if (_activeSession is null) return;
+        _voteError = null;
+
+        var removing = _myVotes.Contains(gameId);
+        if (!removing && _myVotes.Count >= MaxVotes)
+        {
+            _voteError = $"You've used all {MaxVotes} votes. Remove one before voting for another.";
+            return;
+        }
+
+        // Optimistic local toggle for instant feedback
+        if (removing) _myVotes.Remove(gameId);
+        else          _myVotes.Add(gameId);
+
+        try
+        {
+            var tally = await VoteService.CastVoteAsync(_activeSession.Id, _userId, gameId);
+            _tally    = tally;
+            VoteNotifier.NotifyTallyUpdated(GroupId, tally);
+        }
+        catch (Exception ex)
+        {
+            // Revert optimistic update on failure
+            if (removing) _myVotes.Add(gameId);
+            else          _myVotes.Remove(gameId);
+            _voteError = ex.Message;
+        }
+    }
+
+    private async Task CloseSession()
+    {
+        if (_activeSession is null) return;
+        _closingVote = true; _voteError = null;
+        try
+        {
+            var session    = await VoteService.CloseSessionAsync(_activeSession.Id, GroupId, _userId);
+            _activeSession = session;
+            VoteNotifier.NotifySessionClosed(GroupId, session);
+        }
+        catch (Exception ex) { _voteError = ex.Message; }
+        finally { _closingVote = false; }
+    }
+
+    // ── Tag filter + sort ────────────────────────────────────────────────────
+
+    private IEnumerable<string> AvailableCommonTags => _commonGames
+        .SelectMany(g => g.Tags)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(t => t);
+
+    private IEnumerable<GameCandidateDto> FilteredCommonGames =>
+        ApplyCommonSort(_selectedTags.Count == 0
+            ? _commonGames
+            : _commonGames.Where(g => _selectedTags.All(t => g.Tags.Contains(t, StringComparer.OrdinalIgnoreCase))));
+
+    private IEnumerable<GameCandidateDto> ApplyCommonSort(IEnumerable<GameCandidateDto> src) => _commonSortMode switch
+    {
+        "za"     => src.OrderByDescending(g => g.Name),
+        "review" => src.OrderByDescending(g => g.ReviewScore),
+        _        => src.OrderBy(g => g.Name),
+    };
+
+    private void ToggleCommonTag(string tag)
+    {
+        if (!_selectedTags.Remove(tag)) _selectedTags.Add(tag);
+    }
+
+    // ── Group deletion ───────────────────────────────────────────────────────
+
+    private async Task DeleteGroup()
+    {
+        _deleting = true;
+        try
+        {
+            await GroupService.DeleteGroupAsync(GroupId, _userId);
+            Nav.NavigateTo("/groups", forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _showDeleteConfirm = false;
+        }
+        finally { _deleting = false; }
+    }
+
+    // ── Candidate search (typeahead) ──────────────────────────────────────────
+
+    private async Task OnSearchInput(ChangeEventArgs e)
+    {
+        _searchQuery = e.Value?.ToString() ?? string.Empty;
+        _searchError = null;
+
+        await _debounceCts.CancelAsync();
+        _debounceCts.Dispose();
+        _debounceCts = new CancellationTokenSource();
+
+        if (_searchQuery.Length < 2)
+        {
+            _dropdownResults = [];
+            _showDropdown    = false;
+            return;
+        }
+
+        var ct = _debounceCts.Token;
+        try
+        {
+            await Task.Delay(300, ct);
+            await RunSearch(ct);
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && _searchQuery.Length >= 2)
+        {
+            await _debounceCts.CancelAsync();
+            await RunSearch(CancellationToken.None);
+        }
+        else if (e.Key == "Escape")
+        {
+            _showDropdown = false;
+        }
+    }
+
+    private async Task OnSearchBlur()
+    {
+        // Small delay so a click on a dropdown item fires before the dropdown closes
+        await Task.Delay(150);
+        _showDropdown = false;
+    }
+
+    private async Task RunSearch(CancellationToken ct)
+    {
+        _searching = true;
+        try
+        {
+            var results      = await GroupService.SearchGamesAsync(_searchQuery, ct);
+            _dropdownResults = results.Take(5).ToList();
+            _showDropdown    = _dropdownResults.Count > 0;
+            if (_dropdownResults.Count == 0) _searchError = "No games found.";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _searchError = $"Search failed: {ex.Message}";
+        }
+        finally { _searching = false; }
+    }
+
+    private async Task SelectResult(GameSearchResultDto result)
+    {
+        if (_candidates.Any(c => c.AppId == result.AppId)) return;
+
+        _showDropdown = false;
+        _searchQuery  = string.Empty;
+        _dropdownResults = [];
+
+        _busy = true;
+        try
+        {
+            var dto = await GroupService.AddGroupCandidateAsync(
+                GroupId, _userId, result.AppId, result.Name, result.CoverImageUrl);
+            if (!_candidates.Any(c => c.Id == dto.Id))
+            {
+                _candidates.Add(dto);
+                _candidates = [.. _candidates.OrderBy(c => c.Name)];
+            }
+        }
+        catch (Exception ex) { _searchError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task RemoveCandidate(Guid candidateId)
+    {
+        _busy = true;
+        try
+        {
+            await GroupService.RemoveGroupCandidateAsync(GroupId, candidateId);
+            _candidates.RemoveAll(c => c.Id == candidateId);
+        }
+        catch (Exception ex) { _searchError = ex.Message; }
+        finally { _busy = false; }
+    }
+}

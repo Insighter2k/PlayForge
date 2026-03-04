@@ -1,0 +1,91 @@
+@page "/groups/{GroupId:guid}/history"
+@attribute [Authorize]
+@using PlayForge.Application.DTOs
+@using PlayForge.Application.Interfaces
+@inject IVoteService  VoteService
+@inject IGroupService GroupService
+@inject NavigationManager Nav
+
+<PageTitle>Vote History — PlayForge</PageTitle>
+
+@if (_loading)
+{
+    <div class="page-loading">Loading vote history…</div>
+}
+else if (_error is not null)
+{
+    <div class="page-error">@_error</div>
+}
+else
+{
+    <div class="library-header">
+        <div>
+            <a class="back-link" href="/groups/@GroupId">‹ @(_groupName ?? "Group")</a>
+            <h1>Vote History</h1>
+        </div>
+        <span class="library-count">@_history.Count sessions</span>
+    </div>
+
+    @if (_history.Count == 0)
+    {
+        <p class="page-empty">No completed vote sessions yet.</p>
+    }
+    else
+    {
+        <div class="history-list">
+            @foreach (var entry in _history)
+            {
+                <div class="history-card">
+                    @if (entry.WinnerCoverImageUrl is not null)
+                    {
+                        <img class="history-cover"
+                             src="@entry.WinnerCoverImageUrl"
+                             data-src="@entry.WinnerCoverImageUrl"
+                             alt="@entry.WinnerName"
+                             loading="lazy"
+                             onerror="window.onCoverError(this)" />
+                        <div class="cover-placeholder history-cover" style="display:none" aria-hidden="true"></div>
+                    }
+                    else
+                    {
+                        <div class="history-cover history-cover--placeholder"></div>
+                    }
+
+                    <div class="history-info">
+                        <span class="history-winner-label">Winner</span>
+                        <span class="history-winner-name">@(entry.WinnerName ?? "No winner")</span>
+                        <span class="history-meta">
+                            @entry.TotalVotes vote@(entry.TotalVotes == 1 ? "" : "s")
+                            &nbsp;·&nbsp;
+                            @FormatDate(entry.ClosedAt ?? entry.StartedAt)
+                        </span>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public Guid GroupId { get; set; }
+
+    private IReadOnlyList<VoteHistoryEntryDto> _history   = [];
+    private string?                            _groupName;
+    private bool                               _loading   = true;
+    private string?                            _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var group  = await GroupService.GetGroupAsync(GroupId);
+            _groupName = group?.Name;
+            _history   = await VoteService.GetGroupHistoryAsync(GroupId);
+        }
+        catch (Exception ex) { _error = $"Failed to load history: {ex.Message}"; }
+        finally { _loading = false; }
+    }
+
+    private static string FormatDate(DateTimeOffset dt) =>
+        dt.ToLocalTime().ToString("MMM d, yyyy");
+}

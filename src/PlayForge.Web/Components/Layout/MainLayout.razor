@@ -1,0 +1,18 @@
+@inherits LayoutComponentBase
+
+<div class="page">
+    <header class="site-header">
+        <div class="header-inner">
+            <a href="/" class="brand">PlayForge</a>
+            <NavMenu />
+        </div>
+    </header>
+
+    <main class="main-content">
+        @Body
+    </main>
+
+    <footer class="site-footer">
+        <span>PlayForge &copy; @DateTime.UtcNow.Year</span>
+    </footer>
+</div>

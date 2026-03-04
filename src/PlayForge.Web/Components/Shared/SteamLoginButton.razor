@@ -1,0 +1,9 @@
+@* Reusable Steam login button — navigates to auth challenge endpoint *@
+<a href="/auth/login?returnUrl=@Uri.EscapeDataString(ReturnUrl)" class="btn-steam @CssClass">
+    Login with Steam
+</a>
+
+@code {
+    [Parameter] public string ReturnUrl { get; set; } = "/";
+    [Parameter] public string CssClass  { get; set; } = string.Empty;
+}

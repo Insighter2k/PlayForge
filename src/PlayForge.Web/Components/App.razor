@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PlayForge</title>
+    <base href="/" />
+    <link rel="stylesheet" href="css/steam-theme.css" />
+    <HeadOutlet />
+</head>
+<body>
+    <Routes />
+
+    <div id="components-reconnect-modal">
+        <div class="reconnect-backdrop">
+            <div class="reconnect-dialog">
+                <div class="reconnect-msg reconnect-msg--attempting">
+                    <div class="reconnect-spinner"></div>
+                    <p>Reconnecting to server…</p>
+                </div>
+                <div class="reconnect-msg reconnect-msg--failed">
+                    <p>Connection lost. Could not reconnect to the server.</p>
+                    <div class="reconnect-actions">
+                        <button class="btn-steam-outline" onclick="window.Blazor.reconnect()">Retry</button>
+                        <button class="btn-steam-outline" onclick="location.reload()">Reload page</button>
+                    </div>
+                </div>
+                <div class="reconnect-msg reconnect-msg--rejected">
+                    <p>Your session has expired.</p>
+                    <div class="reconnect-actions">
+                        <button class="btn-steam" onclick="location.reload()">Reload page</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="_framework/blazor.server.js"></script>
+    <script src="js/cover-img.js" defer></script>
+    <script src="js/hover-preview.js" defer></script>
+</body>
+</html>

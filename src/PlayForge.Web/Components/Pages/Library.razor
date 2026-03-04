@@ -1,0 +1,145 @@
+@page "/library"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using PlayForge.Application.DTOs
+@using PlayForge.Application.Interfaces
+@inject ILibraryService LibraryService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Library — PlayForge</PageTitle>
+
+@if (_loading)
+{
+    <div class="page-loading">Syncing your Steam library…</div>
+}
+else if (_error is not null)
+{
+    <div class="page-error">@_error</div>
+}
+else
+{
+    <div class="library-header">
+        <h1>Your Library</h1>
+        <div class="library-controls">
+            <span class="library-count">@_filtered.Count() / @_games.Count games</span>
+            <select class="sort-select" @bind="_sortMode">
+                <option value="playtime-desc">Most Played</option>
+                <option value="playtime-asc">Least Played</option>
+                <option value="az">A → Z</option>
+                <option value="za">Z → A</option>
+                <option value="review">Review Score</option>
+            </select>
+        </div>
+    </div>
+
+    @if (_availableTags.Any())
+    {
+        <div class="tag-filter">
+            @foreach (var tag in _availableTags)
+            {
+                <button class="tag-chip @(_selectedTags.Contains(tag) ? "tag-chip--active" : "")"
+                        @onclick="() => ToggleTag(tag)">@tag</button>
+            }
+            @if (_selectedTags.Count > 0)
+            {
+                <button class="tag-chip tag-chip--clear" @onclick="ClearTags">✕ Clear</button>
+            }
+        </div>
+    }
+
+    @if (!_filtered.Any())
+    {
+        <p class="page-empty">No games match the selected filters.</p>
+    }
+    else
+    {
+        <div class="game-grid">
+            @foreach (var game in _filtered)
+            {
+                <div class="game-card" data-game-appid="@game.AppId">
+                    <div class="game-cover-wrap">
+                        <a href="https://store.steampowered.com/app/@game.AppId/"
+                           target="_blank" rel="noopener noreferrer" class="game-store-link"
+                           title="View on Steam">
+                            <img class="game-cover"
+                                 src="@game.CoverImageUrl"
+                                 data-src="@game.CoverImageUrl"
+                                 alt="@game.Name"
+                                 loading="lazy"
+                                 onerror="window.onCoverError(this)" />
+                            <div class="cover-placeholder game-cover" style="display:none" aria-hidden="true"></div>
+                        </a>
+                    </div>
+                    <div class="game-meta">
+                        <span class="game-title">@game.Name</span>
+                        <span class="game-playtime">@FormatPlaytime(game.PlaytimeMinutes)</span>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    private IReadOnlyList<GameDto> _games        = [];
+    private HashSet<string>        _selectedTags = new(StringComparer.OrdinalIgnoreCase);
+    private string                 _sortMode     = "playtime-desc";
+    private bool                   _loading      = true;
+    private string?                _error;
+
+    private IEnumerable<string>  _availableTags => _games
+        .SelectMany(g => g.Tags)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(t => t);
+
+    private IEnumerable<GameDto> _filtered =>
+        ApplySort(_selectedTags.Count == 0
+            ? _games
+            : _games.Where(g => _selectedTags.All(t => g.Tags.Contains(t, StringComparer.OrdinalIgnoreCase))));
+
+    private IEnumerable<GameDto> ApplySort(IEnumerable<GameDto> src) => _sortMode switch
+    {
+        "az"           => src.OrderBy(g => g.Name),
+        "za"           => src.OrderByDescending(g => g.Name),
+        "playtime-asc" => src.OrderBy(g => g.PlaytimeMinutes),
+        "review"       => src.OrderByDescending(g => g.ReviewScore),
+        _              => src.OrderByDescending(g => g.PlaytimeMinutes),
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var auth      = await AuthStateProvider.GetAuthenticationStateAsync();
+            var userIdStr = auth.User.FindFirst("playforge_user_id")?.Value;
+
+            if (userIdStr is null || !Guid.TryParse(userIdStr, out var userId))
+            {
+                _error = "Session error — please log in again.";
+                return;
+            }
+
+            _games = await LibraryService.SyncAndGetLibraryAsync(userId);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load library: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void ToggleTag(string tag)
+    {
+        if (!_selectedTags.Remove(tag)) _selectedTags.Add(tag);
+    }
+
+    private void ClearTags() => _selectedTags.Clear();
+
+    private static string FormatPlaytime(int minutes) =>
+        minutes < 60
+            ? $"{minutes}m"
+            : $"{minutes / 60:N0}h {minutes % 60}m";
+}
